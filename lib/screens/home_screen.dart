@@ -1,25 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../config/app_config.dart';
 import '../database/database_helper.dart';
 import '../models/inventory_type.dart';
 import '../models/rental.dart';
 import '../services/auto_close_service.dart';
+import '../services/export_service.dart';
+import '../services/notification_service.dart';
 import '../widgets/item_grid.dart';
 import 'review_screen.dart';
 import 'settings_screen.dart';
 import 'ga_select_screen.dart';
+import 'stats_screen.dart';
+import 'goals_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  // V3: optional greeting shown after GA login
+  final String? greetingMessage;
+  const HomeScreen({super.key, this.greetingMessage});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   TabController? _tabController;
   List<InventoryType> _types = [];
-  // itemTypeId -> set of active item numbers
   Map<String, Set<int>> _activeMap = {};
   Map<String, Set<int>> _missingMap = {};
   int _unverifiedCount = 0;
@@ -32,6 +39,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _init();
+
+    // V3: show welcome greeting after first frame
+    if (widget.greetingMessage != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(widget.greetingMessage!),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      });
+    }
   }
 
   Future<void> _init() async {
@@ -52,13 +72,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     final activeMap = <String, Set<int>>{};
     final missingMap = <String, Set<int>>{};
-
     for (final type in types) {
-      final activeRentals = await db.getActiveRentalsForType(type.id, location);
-      activeMap[type.id] = activeRentals.map((r) => r.itemNumber).toSet();
+      final active = await db.getActiveRentalsForType(type.id, location);
+      activeMap[type.id] = active.map((r) => r.itemNumber).toSet();
       final missing = await db.getMissingItemNumbers(type.id, location);
       missingMap[type.id] = missing.toSet();
     }
+
+    // V2: reschedule pre-cutoff reminder on every state change
+    NotificationService.scheduleCutoffReminder(activeCount);
 
     if (!mounted) return;
     setState(() {
@@ -78,6 +100,57 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     });
   }
 
+  // V2: prompt for customer initials (optional) before opening a rental
+  Future<String?> _promptInitials() {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Customer Initials'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Optional — tap Skip to open without.',
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              maxLength: 2,
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z]'))
+              ],
+              decoration: const InputDecoration(
+                hintText: 'e.g. KO',
+                counterText: '',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+              onSubmitted: (v) {
+                final clean = v.trim().toUpperCase();
+                Navigator.pop(
+                    ctx, clean.length == 2 ? '${clean[0]}.${clean[1]}' : null);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Skip')),
+          FilledButton(
+            onPressed: () {
+              final clean = ctrl.text.trim().toUpperCase();
+              Navigator.pop(
+                  ctx, clean.length == 2 ? '${clean[0]}.${clean[1]}' : null);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _handleBubbleTap(String typeId, int itemNumber) async {
     final db = DatabaseHelper.instance;
     final location = AppConfig.currentLocation.id;
@@ -86,18 +159,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     final active = await db.getActiveRental(typeId, itemNumber, location);
     if (active != null) {
-      // Close the rental
       await db.updateRental(active.copyWith(
         endTime: DateTime.now(),
         closedByGa: gaNumber,
         status: RentalStatus.closedNormal,
       ));
     } else {
-      // Open a new rental
+      // V2: collect initials before inserting
+      String? initials;
+      if (mounted) initials = await _promptInitials();
       await db.insertRental(Rental(
         itemTypeId: typeId,
         itemNumber: itemNumber,
         openedByGa: gaNumber,
+        customerInitials: initials,
         startTime: DateTime.now(),
         status: RentalStatus.active,
         date: today,
@@ -105,6 +180,28 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ));
     }
     await _loadData();
+  }
+
+  // V2: export today's rentals as JSON
+  Future<void> _export() async {
+    try {
+      final path = await ExportService.exportTodayAsJson();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved to $path'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Export failed: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating),
+      );
+    }
   }
 
   @override
@@ -126,25 +223,67 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(AppConfig.currentLocation.displayName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            Text('GA ${AppConfig.currentGaNumber} — ${AppConfig.currentGaName}',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
+            Text(AppConfig.currentLocation.displayName,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              'GA ${AppConfig.currentGaNumber} — ${AppConfig.currentGaName}',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+            ),
           ],
         ),
         actions: [
+          // V3: per-GA stats
           IconButton(
-            icon: const Icon(Icons.swap_horiz),
-            tooltip: 'Switch GA',
-            onPressed: () => Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const GASelectScreen()),
-            ),
+            icon: const Icon(Icons.bar_chart_outlined),
+            tooltip: 'My Stats',
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const StatsScreen())),
           ),
+          // V3: team goals
           IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () async {
-              await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
-              _loadData();
+            icon: const Icon(Icons.emoji_events_outlined),
+            tooltip: 'Goals',
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const GoalsScreen())),
+          ),
+          PopupMenuButton<String>(
+            onSelected: (v) async {
+              switch (v) {
+                case 'switch':
+                  Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (_) => const GASelectScreen()));
+                case 'export':
+                  _export();
+                case 'settings':
+                  await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()));
+                  _loadData();
+              }
             },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                  value: 'switch',
+                  child: Row(children: [
+                    Icon(Icons.swap_horiz, size: 20),
+                    SizedBox(width: 8),
+                    Text('Switch GA')
+                  ])),
+              PopupMenuItem(
+                  value: 'export',
+                  child: Row(children: [
+                    Icon(Icons.download_outlined, size: 20),
+                    SizedBox(width: 8),
+                    Text('Export today')
+                  ])),
+              PopupMenuItem(
+                  value: 'settings',
+                  child: Row(children: [
+                    Icon(Icons.settings_outlined, size: 20),
+                    SizedBox(width: 8),
+                    Text('Settings')
+                  ])),
+            ],
           ),
         ],
         bottom: _loading || _types.isEmpty
@@ -159,18 +298,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(t.displayName),
-                        if (active > 0) ...
-                          [
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.green.shade600,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text('$active', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                        if (active > 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade600,
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                          ],
+                            child: Text('$active',
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 11)),
+                          ),
+                        ],
                       ],
                     ),
                   );
@@ -186,8 +327,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     count: _unverifiedCount,
                     onTap: () async {
                       await Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const ReviewScreen()),
-                      );
+                          MaterialPageRoute(
+                              builder: (_) => const ReviewScreen()));
                       _loadData();
                     },
                   ),
@@ -196,14 +337,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       ? const Center(child: Text('No inventory configured.'))
                       : TabBarView(
                           controller: _tabController,
-                          children: _types.map((type) {
-                            return ItemGrid(
-                              totalCount: type.totalCount,
-                              activeNumbers: _activeMap[type.id] ?? {},
-                              missingNumbers: _missingMap[type.id] ?? {},
-                              onTap: (n) => _handleBubbleTap(type.id, n),
-                            );
-                          }).toList(),
+                          children: _types
+                              .map((type) => ItemGrid(
+                                    totalCount: type.totalCount,
+                                    activeNumbers:
+                                        _activeMap[type.id] ?? {},
+                                    missingNumbers:
+                                        _missingMap[type.id] ?? {},
+                                    onTap: (n) =>
+                                        _handleBubbleTap(type.id, n),
+                                  ))
+                              .toList(),
                         ),
                 ),
                 _StatsFooter(
@@ -230,15 +374,18 @@ class _UnverifiedBanner extends StatelessWidget {
       child: Container(
         width: double.infinity,
         color: Colors.orange.shade700,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 18),
+            const Icon(Icons.warning_amber_rounded,
+                color: Colors.white, size: 18),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 '$count rental${count == 1 ? '' : 's'} from yesterday need review',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w500),
               ),
             ),
             const Icon(Icons.chevron_right, color: Colors.white),
@@ -269,13 +416,20 @@ class _StatsFooter extends StatelessWidget {
         color: Colors.grey.shade50,
         border: Border(top: BorderSide(color: Colors.grey.shade200)),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+      padding:
+          const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _Stat(label: 'Out now', value: '$activeCount', color: Colors.green.shade600),
+          _Stat(
+              label: 'Out now',
+              value: '$activeCount',
+              color: Colors.green.shade600),
           _Stat(label: 'Today', value: '$todayCount'),
-          _Stat(label: 'Revenue', value: formatRevenue(todayRevenuePence), color: Colors.blue.shade700),
+          _Stat(
+              label: 'Revenue',
+              value: formatRevenue(todayRevenuePence),
+              color: Colors.blue.shade700),
         ],
       ),
     );
@@ -293,8 +447,14 @@ class _Stat extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+        Text(value,
+            style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: color)),
+        Text(label,
+            style:
+                TextStyle(fontSize: 11, color: Colors.grey.shade500)),
       ],
     );
   }

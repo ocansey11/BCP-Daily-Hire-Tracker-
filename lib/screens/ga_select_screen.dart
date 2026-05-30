@@ -35,8 +35,12 @@ class _GASelectScreenState extends State<GASelectScreen> {
   Future<void> _selectGA(GA ga) async {
     await ShiftService.startShift(ga);
     if (!mounted) return;
+    // V3: pass greeting to home screen
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      MaterialPageRoute(
+        builder: (_) =>
+            HomeScreen(greetingMessage: 'Welcome back, ${ga.displayName}!'),
+      ),
     );
   }
 
@@ -51,22 +55,22 @@ class _GASelectScreenState extends State<GASelectScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                if (AppConfig.isLocationSet) ...
-                  [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                      child: Row(
-                        children: [
-                          Icon(Icons.location_on, size: 16, color: Colors.grey.shade500),
-                          const SizedBox(width: 4),
-                          Text(
-                            AppConfig.currentLocation.displayName,
-                            style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
-                          ),
-                        ],
-                      ),
+                if (AppConfig.isLocationSet)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                    child: Row(
+                      children: [
+                        Icon(Icons.location_on,
+                            size: 16, color: Colors.grey.shade500),
+                        const SizedBox(width: 4),
+                        Text(
+                          AppConfig.currentLocation.displayName,
+                          style: TextStyle(
+                              color: Colors.grey.shade500, fontSize: 13),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.all(16),
@@ -76,15 +80,21 @@ class _GASelectScreenState extends State<GASelectScreen> {
                       return Card(
                         margin: const EdgeInsets.symmetric(vertical: 6),
                         child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 8),
                           leading: CircleAvatar(
                             backgroundColor: Colors.blue.shade700,
                             child: Text(
                               '#${ga.gaNumber}',
-                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ),
-                          title: Text(ga.displayName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                          title: Text(ga.displayName,
+                              style: const TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w500)),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () => _selectGA(ga),
                         ),
