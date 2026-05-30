@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'services/notification_service.dart';
 import 'services/settings_service.dart';
 import 'screens/onboarding/onboarding_flow.dart';
 import 'screens/ga_select_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await NotificationService.init();
   runApp(const BCPTrackerApp());
 }
 
