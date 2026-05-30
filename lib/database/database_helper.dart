@@ -3,7 +3,6 @@ import 'package:path/path.dart';
 import '../models/inventory_type.dart';
 import '../models/rental.dart';
 import '../models/ga.dart';
-import '../models/beach_location.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -33,14 +32,12 @@ class DatabaseHelper {
         is_archived INTEGER NOT NULL DEFAULT 0
       )
     ''');
-
     await db.execute('''
       CREATE TABLE gas (
         ga_number INTEGER PRIMARY KEY,
         display_name TEXT NOT NULL
       )
     ''');
-
     await db.execute('''
       CREATE TABLE rentals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +54,6 @@ class DatabaseHelper {
         location TEXT NOT NULL
       )
     ''');
-
     await db.execute('''
       CREATE TABLE inventory_changes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +67,6 @@ class DatabaseHelper {
         notes TEXT
       )
     ''');
-
     await db.execute('''
       CREATE TABLE shift_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,14 +76,12 @@ class DatabaseHelper {
         location TEXT NOT NULL
       )
     ''');
-
     await db.execute('''
       CREATE TABLE app_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       )
     ''');
-
     await db.execute('CREATE INDEX idx_active ON rentals(item_type_id, item_number, status)');
     await db.execute('CREATE INDEX idx_date ON rentals(date)');
     await db.execute('CREATE INDEX idx_location_date ON rentals(location, date)');
@@ -113,7 +106,8 @@ class DatabaseHelper {
   Future<List<InventoryType>> getInventoryTypes({bool includeArchived = false}) async {
     final db = await database;
     final where = includeArchived ? null : 'is_archived = 0';
-    final rows = await db.query('inventory_types', where: where, orderBy: 'is_default DESC, display_name ASC');
+    final rows = await db.query('inventory_types',
+        where: where, orderBy: 'is_default DESC, display_name ASC');
     return rows.map(InventoryType.fromMap).toList();
   }
 
@@ -125,12 +119,14 @@ class DatabaseHelper {
 
   Future<void> insertInventoryType(InventoryType type) async {
     final db = await database;
-    await db.insert('inventory_types', type.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('inventory_types', type.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> updateInventoryType(InventoryType type) async {
     final db = await database;
-    await db.update('inventory_types', type.toMap(), where: 'id = ?', whereArgs: [type.id]);
+    await db.update('inventory_types', type.toMap(),
+        where: 'id = ?', whereArgs: [type.id]);
   }
 
   // ── GAs ───────────────────────────────────────────────────────────────────
@@ -159,7 +155,8 @@ class DatabaseHelper {
 
   Future<void> updateGA(GA ga) async {
     final db = await database;
-    await db.update('gas', ga.toMap(), where: 'ga_number = ?', whereArgs: [ga.gaNumber]);
+    await db.update('gas', ga.toMap(),
+        where: 'ga_number = ?', whereArgs: [ga.gaNumber]);
   }
 
   // ── Rentals ───────────────────────────────────────────────────────────────
@@ -171,10 +168,12 @@ class DatabaseHelper {
 
   Future<void> updateRental(Rental rental) async {
     final db = await database;
-    await db.update('rentals', rental.toMap(), where: 'id = ?', whereArgs: [rental.id]);
+    await db.update('rentals', rental.toMap(),
+        where: 'id = ?', whereArgs: [rental.id]);
   }
 
-  Future<Rental?> getActiveRental(String itemTypeId, int itemNumber, String location) async {
+  Future<Rental?> getActiveRental(
+      String itemTypeId, int itemNumber, String location) async {
     final db = await database;
     final rows = await db.query(
       'rentals',
@@ -184,7 +183,8 @@ class DatabaseHelper {
     return rows.isEmpty ? null : Rental.fromMap(rows.first);
   }
 
-  Future<List<Rental>> getActiveRentalsForType(String itemTypeId, String location) async {
+  Future<List<Rental>> getActiveRentalsForType(
+      String itemTypeId, String location) async {
     final db = await database;
     final rows = await db.query(
       'rentals',
@@ -215,7 +215,8 @@ class DatabaseHelper {
     return rows.map(Rental.fromMap).toList();
   }
 
-  Future<List<Rental>> getRentalsForDate(String date, String location) async {
+  Future<List<Rental>> getRentalsForDate(
+      String date, String location) async {
     final db = await database;
     final rows = await db.query(
       'rentals',
@@ -272,6 +273,76 @@ class DatabaseHelper {
     );
   }
 
+  // ── Stats (V2+V3) ───────────────────────────────────────────────────────
+
+  Future<int> sumRevenuePenceForPeriod({
+    required String startDate,
+    required String endDate,
+    required String location,
+    int? gaNumber,
+  }) async {
+    final db = await database;
+    final gaClause = gaNumber != null ? 'AND r.opened_by_ga = ?' : '';
+    final args = [
+      startDate, endDate, location, 'active',
+      if (gaNumber != null) gaNumber,
+    ];
+    final result = await db.rawQuery(
+      '''
+      SELECT SUM(it.price_pence) as total
+      FROM rentals r
+      JOIN inventory_types it ON r.item_type_id = it.id
+      WHERE r.date >= ? AND r.date <= ? AND r.location = ?
+      AND r.status != ? $gaClause
+      ''',
+      args,
+    );
+    return (result.first['total'] as int?) ?? 0;
+  }
+
+  Future<int> countRentalsForPeriod({
+    required String startDate,
+    required String endDate,
+    required String location,
+    int? gaNumber,
+  }) async {
+    final db = await database;
+    final gaClause = gaNumber != null ? 'AND opened_by_ga = ?' : '';
+    final args = [
+      startDate, endDate, location,
+      if (gaNumber != null) gaNumber,
+    ];
+    final result = await db.rawQuery(
+      '''
+      SELECT COUNT(*) as count FROM rentals
+      WHERE date >= ? AND date <= ? AND location = ? $gaClause
+      ''',
+      args,
+    );
+    return (result.first['count'] as int?) ?? 0;
+  }
+
+  Future<List<Map<String, dynamic>>> getTeamStatsByGA({
+    required String startDate,
+    required String endDate,
+    required String location,
+  }) async {
+    final db = await database;
+    return db.rawQuery(
+      '''
+      SELECT r.opened_by_ga, COUNT(*) as rental_count,
+             SUM(it.price_pence) as revenue_pence
+      FROM rentals r
+      JOIN inventory_types it ON r.item_type_id = it.id
+      WHERE r.date >= ? AND r.date <= ? AND r.location = ?
+      AND r.status != 'active'
+      GROUP BY r.opened_by_ga
+      ORDER BY revenue_pence DESC
+      ''',
+      [startDate, endDate, location],
+    );
+  }
+
   // ── Shift Log ─────────────────────────────────────────────────────────────
 
   Future<int> startShift(int gaNumber, String location) async {
@@ -321,7 +392,8 @@ class DatabaseHelper {
 
   // ── Missing Items ─────────────────────────────────────────────────────────
 
-  Future<List<int>> getMissingItemNumbers(String itemTypeId, String location) async {
+  Future<List<int>> getMissingItemNumbers(
+      String itemTypeId, String location) async {
     final db = await database;
     final rows = await db.query(
       'rentals',
