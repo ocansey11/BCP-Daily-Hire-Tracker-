@@ -283,13 +283,16 @@ class DatabaseHelper {
     });
   }
 
-  Future<void> endCurrentShift(int gaNumber, String location) async {
+  Future<void> pauseCurrentShift(int gaNumber, String location) async {
     final db = await database;
     await db.rawUpdate(
       '''
       UPDATE shift_log SET ended_at = ?
-      WHERE ga_number = ? AND location = ? AND ended_at IS NULL
-      ORDER BY started_at DESC LIMIT 1
+      WHERE id = (
+        SELECT id FROM shift_log
+        WHERE ga_number = ? AND location = ? AND ended_at IS NULL
+        ORDER BY started_at DESC LIMIT 1
+      )
       ''',
       [DateTime.now().toIso8601String(), gaNumber, location],
     );

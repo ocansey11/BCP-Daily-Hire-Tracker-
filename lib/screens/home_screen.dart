@@ -135,9 +135,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           IconButton(
             icon: const Icon(Icons.swap_horiz),
             tooltip: 'Switch GA',
-            onPressed: () => Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const GASelectScreen()),
-            ),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const GASelectScreen(isSwitchMode: true)),
+              );
+              if (mounted) _loadData();
+            },
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
