@@ -20,7 +20,7 @@ class BCPTrackerApp extends StatelessWidget {
         colorSchemeSeed: Colors.blue,
         useMaterial3: true,
         appBarTheme: const AppBarTheme(centerTitle: false, elevation: 0),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           color: Colors.grey.shade50,
