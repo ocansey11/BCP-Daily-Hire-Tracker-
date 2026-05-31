@@ -9,16 +9,16 @@ class ShiftService {
     final location = AppConfig.currentLocation.id;
 
     if (AppConfig.isGaSet) {
-      await DatabaseHelper.instance.endCurrentShift(AppConfig.currentGaNumber, location);
+      await DatabaseHelper.instance.pauseCurrentShift(AppConfig.currentGaNumber, location);
     }
 
     _currentShiftId = await DatabaseHelper.instance.startShift(ga.gaNumber, location);
     AppConfig.setCurrentGa(ga.gaNumber, ga.displayName);
   }
 
-  static Future<void> endShift() async {
+  static Future<void> pauseShift() async {
     if (!AppConfig.isGaSet) return;
-    await DatabaseHelper.instance.endCurrentShift(
+    await DatabaseHelper.instance.pauseCurrentShift(
       AppConfig.currentGaNumber,
       AppConfig.currentLocation.id,
     );

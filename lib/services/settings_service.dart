@@ -35,6 +35,11 @@ class SettingsService {
     await DatabaseHelper.instance.setSetting(_keyCutoffMinute, minute.toString());
   }
 
+  static Future<void> setLocation(BeachLocation location) async {
+    await DatabaseHelper.instance.setSetting(_keyLocation, location.id);
+    AppConfig.setLocation(location);
+  }
+
   static Future<void> completeOnboarding({
     required BeachLocation location,
     required List<InventoryType> inventoryTypes,

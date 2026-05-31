@@ -117,7 +117,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
                   revenuePence: _teamRevenuePence,
                 ),
                 const SizedBox(height: 16),
-                if (_gaProgress.isNotEmpty) ..[
+                if (_gaProgress.isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(

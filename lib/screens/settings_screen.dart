@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import '../database/database_helper.dart';
+import '../models/beach_location.dart';
 import '../models/ga.dart';
 import '../models/inventory_type.dart';
 import '../services/settings_service.dart';
@@ -199,6 +200,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _load();
   }
 
+  // --- Location ---
+
+  Future<void> _showLocationPicker() async {
+    final db = DatabaseHelper.instance;
+    final activeCount = await db.countActiveRentals(AppConfig.currentLocation.id);
+    if (!mounted) return;
+    if (activeCount > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Return all $activeCount active item${activeCount == 1 ? '' : 's'} before changing location.',
+          ),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+      return;
+    }
+    final picked = await showDialog<BeachLocation>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Choose location'),
+        children: BeachLocation.values.map((loc) {
+          final isCurrent = loc == AppConfig.currentLocation;
+          return SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, loc),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 24,
+                  child: isCurrent
+                      ? Icon(Icons.check, size: 18, color: Colors.green.shade700)
+                      : null,
+                ),
+                Text(
+                  loc.displayName,
+                  style: TextStyle(
+                    fontWeight: isCurrent ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+    if (picked == null || picked == AppConfig.currentLocation) return;
+    final previous = AppConfig.currentLocation;
+    await SettingsService.setLocation(picked);
+    await db.logInventoryChange(
+      changeType: 'location_change',
+      itemTypeId: '',
+      location: picked.id,
+      oldValue: previous.id,
+      newValue: picked.id,
+      changedByGa: AppConfig.isGaSet ? AppConfig.currentGaNumber : null,
+    );
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Location changed to ${picked.displayName}')),
+    );
+  }
+
   // --- Cutoff time ---
 
   Future<void> _showCutoffPicker() async {
@@ -230,13 +294,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               children: [
-                // Location (read-only)
                 _SectionHeader('Beach Location'),
                 ListTile(
                   leading: const Icon(Icons.location_on_outlined),
                   title: Text(AppConfig.currentLocation.displayName),
-                  subtitle: const Text('Cannot be changed'),
-                  trailing: const Icon(Icons.lock_outline, size: 18),
+                  subtitle: const Text('Tap to change'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _showLocationPicker,
                 ),
                 const Divider(),
 

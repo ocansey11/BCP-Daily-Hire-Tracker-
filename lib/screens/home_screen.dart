@@ -251,8 +251,9 @@ class _HomeScreenState extends State<HomeScreen>
             onSelected: (v) async {
               switch (v) {
                 case 'switch':
-                  Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (_) => const GASelectScreen()));
+                  await Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => const GASelectScreen(isSwitchMode: true)));
+                  if (mounted) _loadData();
                 case 'export':
                   _export();
                 case 'settings':
