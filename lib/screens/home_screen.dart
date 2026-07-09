@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../config/app_config.dart';
 import '../database/database_helper.dart';
 import '../models/inventory_type.dart';
@@ -15,7 +14,6 @@ import 'stats_screen.dart';
 import 'goals_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  // V3: optional greeting shown after GA login
   final String? greetingMessage;
   const HomeScreen({super.key, this.greetingMessage});
 
@@ -40,7 +38,6 @@ class _HomeScreenState extends State<HomeScreen>
     super.initState();
     _init();
 
-    // V3: show welcome greeting after first frame
     if (widget.greetingMessage != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -79,7 +76,6 @@ class _HomeScreenState extends State<HomeScreen>
       missingMap[type.id] = missing.toSet();
     }
 
-    // V2: reschedule pre-cutoff reminder on every state change
     NotificationService.scheduleCutoffReminder(activeCount);
 
     if (!mounted) return;
@@ -100,61 +96,9 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
-  // V2: prompt for customer initials (optional) before opening a rental
-  Future<String?> _promptInitials() {
-    final ctrl = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Customer Initials'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Optional — tap Skip to open without.',
-                style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              maxLength: 2,
-              textCapitalization: TextCapitalization.characters,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z]'))
-              ],
-              decoration: const InputDecoration(
-                hintText: 'e.g. KO',
-                counterText: '',
-                border: OutlineInputBorder(),
-              ),
-              autofocus: true,
-              onSubmitted: (v) {
-                final clean = v.trim().toUpperCase();
-                Navigator.pop(
-                    ctx, clean.length == 2 ? '${clean[0]}.${clean[1]}' : null);
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Skip')),
-          FilledButton(
-            onPressed: () {
-              final clean = ctrl.text.trim().toUpperCase();
-              Navigator.pop(
-                  ctx, clean.length == 2 ? '${clean[0]}.${clean[1]}' : null);
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _handleBubbleTap(String typeId, int itemNumber) async {
     final db = DatabaseHelper.instance;
     final location = AppConfig.currentLocation.id;
-    final today = AppConfig.todayDate;
     final gaNumber = AppConfig.currentGaNumber;
 
     final active = await db.getActiveRental(typeId, itemNumber, location);
@@ -165,24 +109,19 @@ class _HomeScreenState extends State<HomeScreen>
         status: RentalStatus.closedNormal,
       ));
     } else {
-      // V2: collect initials before inserting
-      String? initials;
-      if (mounted) initials = await _promptInitials();
       await db.insertRental(Rental(
         itemTypeId: typeId,
         itemNumber: itemNumber,
         openedByGa: gaNumber,
-        customerInitials: initials,
         startTime: DateTime.now(),
         status: RentalStatus.active,
-        date: today,
+        date: AppConfig.todayDate,
         location: location,
       ));
     }
     await _loadData();
   }
 
-  // V2: export today's rentals as JSON
   Future<void> _export() async {
     try {
       final path = await ExportService.exportTodayAsJson();
@@ -197,9 +136,10 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Export failed: $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating),
+          content: Text('Export failed: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     }
   }
@@ -224,8 +164,7 @@ class _HomeScreenState extends State<HomeScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(AppConfig.currentLocation.displayName,
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             Text(
               'GA ${AppConfig.currentGaNumber} — ${AppConfig.currentGaName}',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
@@ -233,14 +172,12 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
         actions: [
-          // V3: per-GA stats
           IconButton(
             icon: const Icon(Icons.bar_chart_outlined),
             tooltip: 'My Stats',
             onPressed: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const StatsScreen())),
           ),
-          // V3: team goals
           IconButton(
             icon: const Icon(Icons.emoji_events_outlined),
             tooltip: 'Goals',
@@ -251,9 +188,8 @@ class _HomeScreenState extends State<HomeScreen>
             onSelected: (v) async {
               switch (v) {
                 case 'switch':
-                  await Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => const GASelectScreen(isSwitchMode: true)));
-                  if (mounted) _loadData();
+                  Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (_) => const GASelectScreen()));
                 case 'export':
                   _export();
                 case 'settings':
@@ -341,12 +277,9 @@ class _HomeScreenState extends State<HomeScreen>
                           children: _types
                               .map((type) => ItemGrid(
                                     totalCount: type.totalCount,
-                                    activeNumbers:
-                                        _activeMap[type.id] ?? {},
-                                    missingNumbers:
-                                        _missingMap[type.id] ?? {},
-                                    onTap: (n) =>
-                                        _handleBubbleTap(type.id, n),
+                                    activeNumbers: _activeMap[type.id] ?? {},
+                                    missingNumbers: _missingMap[type.id] ?? {},
+                                    onTap: (n) => _handleBubbleTap(type.id, n),
                                   ))
                               .toList(),
                         ),
@@ -375,12 +308,10 @@ class _UnverifiedBanner extends StatelessWidget {
       child: Container(
         width: double.infinity,
         color: Colors.orange.shade700,
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded,
-                color: Colors.white, size: 18),
+            const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 18),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -417,15 +348,11 @@ class _StatsFooter extends StatelessWidget {
         color: Colors.grey.shade50,
         border: Border(top: BorderSide(color: Colors.grey.shade200)),
       ),
-      padding:
-          const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _Stat(
-              label: 'Out now',
-              value: '$activeCount',
-              color: Colors.green.shade600),
+          _Stat(label: 'Out now', value: '$activeCount', color: Colors.green.shade600),
           _Stat(label: 'Today', value: '$todayCount'),
           _Stat(
               label: 'Revenue',
@@ -450,12 +377,9 @@ class _Stat extends StatelessWidget {
       children: [
         Text(value,
             style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: color)),
+                fontSize: 18, fontWeight: FontWeight.bold, color: color)),
         Text(label,
-            style:
-                TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
       ],
     );
   }
